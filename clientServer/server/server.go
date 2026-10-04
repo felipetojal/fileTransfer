@@ -1,6 +1,3 @@
-// Servidor de transferência de arquivo com 3 modos de concorrência.
-//
-// Uso: go run ./server -modo seq|thread|pool -porta 5000 -arquivo arq.bin [-n 4]
 package main
 
 import (
@@ -11,32 +8,40 @@ import (
 	"log"
 	"net"
 	"os"
+
+	"github.com/felipetojal/fileTransfer/internal/limitador"
 )
 
-var arquivo string
+var (
+	arquivo string
+	// entre os clientes atendidos ao mesmo tempo, nil = sem limite.
+	lim *limitador.Limitador
+)
 
 func main() {
 	modo := flag.String("modo", "seq", "seq | thread | pool")
 	porta := flag.Int("porta", 5000, "porta TCP")
 	flag.StringVar(&arquivo, "arquivo", "arq.bin", "arquivo a ser enviado")
 	n := flag.Int("n", 4, "numero maximo de clientes simultaneos (modo pool)")
+	banda := flag.Float64("banda", 0, "limite de upload do servidor em Mbit/s (0 = sem limite)")
 	flag.Parse()
 
 	if _, err := os.Stat(arquivo); err != nil {
 		log.Fatalf("arquivo invalido: %v", err)
 	}
+	lim = limitador.Novo(*banda)
 
-	// Criando um listener para a conexão
+	// listener para a conexão
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", *porta))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer ln.Close()
-	log.Printf("servidor [%s] na porta %d (arquivo=%s)", *modo, *porta, arquivo)
+	log.Printf("servidor [%s] na porta %d (arquivo=%s, banda=%.0f Mbit/s)", *modo, *porta, arquivo, *banda)
 
 	switch *modo {
 	case "seq":
-		// 1 cliente por vez: atende na própria goroutine principal
+		// cliente por vez: atende na própria goroutine principal
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
@@ -81,7 +86,7 @@ func main() {
 	}
 }
 
-// handle envia: [8 bytes: tamanho do arquivo][conteúdo]
+// só o conteúdo passa pelo limitador
 func handle(conn net.Conn) {
 	defer conn.Close()
 
@@ -102,8 +107,12 @@ func handle(conn net.Conn) {
 		log.Println("cabecalho:", err)
 		return
 	}
-	// Enviando o arquivo
-	if _, err := io.Copy(conn, f); err != nil {
+
+	var dst io.Writer = conn
+	if lim != nil {
+		dst = lim.Escritor(conn)
+	}
+	if _, err := io.Copy(dst, f); err != nil {
 		log.Println("envio:", err)
 	}
 }
