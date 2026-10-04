@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/felipetojal/fileTransfer/internal/limitador"
 	"io"
 	"log"
 	"net"
@@ -18,7 +19,7 @@ import (
 type Seed struct {
 	meta      Meta
 	arq       *os.File
-	lim       *Limitador
+	lim       *limitador.Limitador
 	esperados int // quantos peers precisam se registrar para a largada
 
 	mu        sync.Mutex
@@ -53,7 +54,7 @@ func novoSeed(caminho string, tamPedaco int64, esperados int, banda float64) (*S
 		setBit(bits, i)
 	}
 	return &Seed{
-		meta: meta, arq: f, lim: novoLimitador(banda), esperados: esperados,
+		meta: meta, arq: f, lim: limitador.Novo(banda), esperados: esperados,
 		tempos: map[string]float64{}, fim: make(chan struct{}), bitsTodos: bits,
 	}, nil
 }
